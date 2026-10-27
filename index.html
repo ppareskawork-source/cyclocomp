@@ -27,6 +27,13 @@
         .title-area { display: flex; align-items: center; gap: 8px; font-weight: bold; }
         .indicator { width: 12px; height: 12px; border-radius: 50%; background-color: #ff4444; }
         .indicator.online { background-color: #00C851; }
+        .top-right { display: flex; gap: 12px; align-items: center; }
+        
+        /* Tombol Riwayat Mini */
+        #historyBtn {
+            padding: 6px 12px; font-size: 0.8rem; font-weight: bold; border-radius: 6px;
+            background-color: #333; color: white; border: 1px solid #555; cursor: pointer;
+        }
         
         /* Dashboard Metrik */
         .dashboard { padding: 15px; flex-shrink: 0; }
@@ -53,15 +60,21 @@
             padding: 15px 15px 30px 15px;
             background-color: #1e1e1e; display: flex; gap: 10px; flex-shrink: 0;
         }
-        button {
+        .big-btn {
             flex: 1; padding: 15px; font-size: 1.2rem; font-weight: bold; border: none; border-radius: 8px;
             color: white; cursor: pointer; text-transform: uppercase;
         }
         #startBtn { background-color: #00C851; }
         #stopBtn { background-color: #ff4444; display: none; }
         
-        /* Tombol Leaflet disesuaikan untuk mode gelap */
-        .leaflet-control-zoom a { background-color: #1e1e1e !important; color: white !important; border: 1px solid #444 !important; }
+        /* Modal Riwayat */
+        .modal { display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); }
+        .modal-content { background-color: #1e1e1e; margin: 15% auto; padding: 20px; width: 90%; max-width: 400px; border-radius: 12px; max-height: 70vh; overflow-y: auto; }
+        .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .history-item { border-bottom: 1px solid #333; padding: 12px 0; }
+        .history-item:last-child { border-bottom: none; }
+        .h-date { font-size: 0.85rem; color: #aaa; margin-bottom: 4px; }
+        .h-stats { display: flex; justify-content: space-between; font-weight: bold; font-size: 1.1rem; }
     </style>
 </head>
 <body>
@@ -70,7 +83,10 @@
         <div class="title-area">
             CYCLOCOMP <div id="db-indicator" class="indicator"></div>
         </div>
-        <div id="time-display">00:00:00</div>
+        <div class="top-right">
+            <button id="historyBtn">RIWAYAT</button>
+            <div id="time-display">00:00:00</div>
+        </div>
     </div>
 
     <div class="dashboard">
@@ -88,42 +104,45 @@
     <div id="map"></div>
 
     <div class="bottom-controls">
-        <button id="startBtn">START</button>
-        <button id="stopBtn">STOP & SAVE</button>
+        <button id="startBtn" class="big-btn">START</button>
+        <button id="stopBtn" class="big-btn">STOP & SAVE</button>
+    </div>
+
+    <!-- Modal Pop-up Riwayat -->
+    <div id="historyModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2 style="margin-top: 0;">Riwayat Gowes</h2>
+            <div id="historyList">Memuat...</div>
+        </div>
     </div>
 
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-        // Konfigurasi Firebase Anda
+        // Konfigurasi Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyDPKhGq_dGVqGViQIwbDHtwAA7DLfuNYa4",
             authDomain: "cyclocomp-f9bdb.firebaseapp.com",
             projectId: "cyclocomp-f9bdb",
             storageBucket: "cyclocomp-f9bdb.firebasestorage.app",
             messagingSenderId: "942879429280",
-            appId: "1:942879429280:web:3b44bf2262cb082b5c6fc5",
-            measurementId: "G-M45DT3DHST"
+            appId: "1:942879429280:web:3b44bf2262cb082b5c6fc5"
         };
 
-        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         const dbIndicator = document.getElementById('db-indicator');
 
-        // Login Anonim otomatis untuk Database
         signInAnonymously(auth).then(() => {
             dbIndicator.classList.add('online');
-            console.log("Firebase Connected!");
-        }).catch((error) => {
-            console.error("Firebase Auth Error:", error);
-        });
+        }).catch((error) => console.error("Firebase Auth Error:", error));
 
-        // Ekspor fungsi save untuk dipanggil tombol STOP
+        // Fungsi Simpan
         window.saveRouteToFirebase = async function(routeData) {
             try {
                 await addDoc(collection(db, "rides"), {
@@ -131,13 +150,53 @@
                     date: new Date().toISOString(),
                     distance_km: routeData.distance,
                     avg_speed_kmh: routeData.avgSpeed,
-                    max_speed_kmh: routeData.maxSpeed,
-                    duration_sec: routeData.duration
+                    max_speed_kmh: routeData.maxSpeed
                 });
-                alert("Data perjalanan berhasil disimpan ke riwayat!");
+                alert("Data perjalanan berhasil disimpan!");
             } catch (e) {
-                console.error("Error saving document: ", e);
-                alert("Gagal menyimpan data ke database. Pastikan Firestore rules sudah diperbarui.");
+                alert("Gagal menyimpan data.");
+            }
+        }
+
+        // Fungsi Load Riwayat
+        window.loadHistoryFromFirebase = async function() {
+            const listDiv = document.getElementById('historyList');
+            listDiv.innerHTML = "Memuat data...";
+            try {
+                if (!auth.currentUser) throw new Error("Belum terhubung ke database.");
+                
+                // Ambil data khusus milik user ini
+                const q = query(collection(db, "rides"), where("userId", "==", auth.currentUser.uid));
+                const querySnapshot = await getDocs(q);
+                
+                let rides = [];
+                querySnapshot.forEach((doc) => rides.push(doc.data()));
+                
+                // Urutkan dari yang terbaru (descending)
+                rides.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                listDiv.innerHTML = "";
+                if (rides.length === 0) {
+                    listDiv.innerHTML = "Belum ada riwayat gowes.";
+                    return;
+                }
+
+                rides.forEach(data => {
+                    const dateStr = new Date(data.date).toLocaleString('id-ID', {
+                        weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                    });
+                    listDiv.innerHTML += `
+                        <div class="history-item">
+                            <div class="h-date">${dateStr}</div>
+                            <div class="h-stats">
+                                <span style="color:#00C851;">${data.distance_km} KM</span>
+                                <span style="color:#aaa; font-size: 0.9rem;">Avg: ${data.avg_speed_kmh} km/h</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (e) {
+                listDiv.innerHTML = "Gagal memuat riwayat.";
             }
         }
     </script>
@@ -147,7 +206,7 @@
     
     <!-- Core App Logic -->
     <script>
-        let map, polyline;
+        let map, polyline, userMarker;
         let watchId = null;
         let isTracking = false;
         let startTime = 0;
@@ -166,18 +225,24 @@
         const valEle = document.getElementById('val-ele');
         const timeDisplay = document.getElementById('time-display');
 
+        // Logic Modal Riwayat
+        const modal = document.getElementById("historyModal");
+        document.getElementById("historyBtn").onclick = () => {
+            modal.style.display = "block";
+            if(window.loadHistoryFromFirebase) window.loadHistoryFromFirebase();
+        }
+        document.querySelector(".close-modal").onclick = () => { modal.style.display = "none"; }
+        window.onclick = (e) => { if (e.target == modal) modal.style.display = "none"; }
+
         function initMap(lat, lng) {
             if (!map) {
                 map = L.map('map').setView([lat, lng], 16);
-                
                 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19,
-                    attribution: '© OpenStreetMap'
+                    maxZoom: 19, attribution: '© OpenStreetMap'
                 }).addTo(map);
-
                 polyline = L.polyline([], {color: '#ff4444', weight: 5}).addTo(map);
             } else {
-                map.setView([lat, lng]);
+                map.setView([lat, lng]); // Peta selalu mengikuti titik pusat
             }
         }
 
@@ -188,13 +253,11 @@
             const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
                       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
                       Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
         function updateTimer() {
-            const now = Date.now();
-            const diff = new Date(now - startTime);
+            const diff = new Date(Date.now() - startTime);
             const hh = String(diff.getUTCHours()).padStart(2, '0');
             const mm = String(diff.getUTCMinutes()).padStart(2, '0');
             const ss = String(diff.getUTCSeconds()).padStart(2, '0');
@@ -202,11 +265,8 @@
         }
 
         startBtn.addEventListener('click', () => {
-            if (!navigator.geolocation) {
-                alert("GPS tidak didukung di perangkat ini.");
-                return;
-            }
-
+            if (!navigator.geolocation) return alert("GPS tidak didukung.");
+            
             isTracking = true;
             startBtn.style.display = 'none';
             stopBtn.style.display = 'block';
@@ -214,9 +274,7 @@
             startTime = Date.now();
             timerInterval = setInterval(updateTimer, 1000);
 
-            if ('wakeLock' in navigator) {
-                navigator.wakeLock.request('screen').catch((err) => console.log("Layar mungkin redup: ", err));
-            }
+            if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(()=>{});
 
             watchId = navigator.geolocation.watchPosition((position) => {
                 const lat = position.coords.latitude;
@@ -225,22 +283,26 @@
                 const alt = position.coords.altitude;
                 const accuracy = position.coords.accuracy;
 
-                if (accuracy > 30) return;
+                if (accuracy > 35) return; // Tolak GPS nyasar
 
                 initMap(lat, lng);
                 polyline.addLatLng([lat, lng]);
 
-                if (positions.length > 0) {
-                    const lastPos = positions[positions.length - 1];
-                    const dist = calculateDistance(lastPos.lat, lastPos.lng, lat, lng);
-                    totalDistance += dist;
+                // Buat atau perbarui titik lokasi pengguna (Blue Dot)
+                if (!userMarker) {
+                    userMarker = L.circleMarker([lat, lng], {
+                        radius: 7, fillColor: "#0088ff", color: "#ffffff", weight: 2, opacity: 1, fillOpacity: 1
+                    }).addTo(map);
+                } else {
+                    userMarker.setLatLng([lat, lng]);
                 }
-                
-                positions.push({lat, lng, time: Date.now()});
 
-                let currentSpeed = speed;
-                if(currentSpeed < 1.5) currentSpeed = 0;
-                
+                if (positions.length > 0) {
+                    totalDistance += calculateDistance(positions[positions.length-1].lat, positions[positions.length-1].lng, lat, lng);
+                }
+                positions.push({lat, lng});
+
+                let currentSpeed = speed < 1.5 ? 0 : speed;
                 if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
                 
                 let durationHours = (Date.now() - startTime) / 3600000;
@@ -250,38 +312,24 @@
                 valDist.textContent = totalDistance.toFixed(2);
                 valMax.textContent = maxSpeed.toFixed(1);
                 valAvg.textContent = avgSpeed.toFixed(1);
-                
                 if (alt) valEle.textContent = Math.round(alt);
 
-            }, (err) => {
-                console.warn('GPS Error:', err.message);
-            }, {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 5000
+            }, (err) => console.warn(err.message), {
+                enableHighAccuracy: true, maximumAge: 0, timeout: 5000
             });
         });
 
         stopBtn.addEventListener('click', () => {
-            isTracking = false;
             navigator.geolocation.clearWatch(watchId);
             clearInterval(timerInterval);
-            
-            startBtn.style.display = 'block';
-            stopBtn.style.display = 'none';
-
-            let durationSeconds = Math.floor((Date.now() - startTime) / 1000);
-            let avgSpeed = parseFloat(valAvg.textContent);
+            startBtn.style.display = 'block'; stopBtn.style.display = 'none';
 
             if (window.saveRouteToFirebase && totalDistance > 0) {
                 window.saveRouteToFirebase({
                     distance: parseFloat(totalDistance.toFixed(2)),
                     maxSpeed: parseFloat(maxSpeed.toFixed(1)),
-                    avgSpeed: avgSpeed,
-                    duration: durationSeconds
+                    avgSpeed: parseFloat(valAvg.textContent)
                 });
-            } else if (totalDistance === 0) {
-                alert("Perjalanan dihentikan. Jarak masih 0 KM, tidak disimpan.");
             }
             
             totalDistance = 0; maxSpeed = 0; positions = [];
